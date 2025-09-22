@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { HeroSection } from '@/components/HeroSection';
 import { JournalistList } from '@/components/JournalistList';
 import { TrustSection } from '@/components/TrustSection';
@@ -7,12 +7,14 @@ import { MidPageCTA } from '@/components/MidPageCTA';
 import { StickyFooterCTA } from '@/components/StickyFooterCTA';
 import { useToast } from '@/hooks/use-toast';
 import type { Journalist } from '@/services/journalists';
+import { analytics } from '@/lib/analytics';
 
 const Index = () => {
   const [submittedWebsite, setSubmittedWebsite] = useState<string | null>(null);
   const [showStickyFooter, setShowStickyFooter] = useState(false);
   const [structuredJournalists, setStructuredJournalists] = useState<Journalist[]>([]);
   const { toast } = useToast();
+  const stickyFooterVisibleRef = useRef(false);
 
   // Show sticky footer when user scrolls past hero
   useEffect(() => {
@@ -44,7 +46,25 @@ const Index = () => {
 
   const handleStickyFooterClose = () => {
     setShowStickyFooter(false);
+    analytics.stickyFooterDismissed({
+      method: 'close_button',
+      website: submittedWebsite,
+    });
   };
+
+  useEffect(() => {
+    if (showStickyFooter && !stickyFooterVisibleRef.current) {
+      analytics.stickyFooterDisplayed({
+        reason: 'scroll_threshold',
+        website: submittedWebsite,
+      });
+      stickyFooterVisibleRef.current = true;
+    }
+
+    if (!showStickyFooter && stickyFooterVisibleRef.current) {
+      stickyFooterVisibleRef.current = false;
+    }
+  }, [showStickyFooter, submittedWebsite]);
 
   const structuredData = useMemo(() => {
     const base = {

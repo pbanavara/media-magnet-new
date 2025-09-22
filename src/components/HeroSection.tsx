@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Rocket, ArrowRight } from 'lucide-react';
 import emailScreenshot from '@/assets/newemail-2.png';
 import wsjArticle from '@/assets/newwsj-2.png';
+import { analytics } from '@/lib/analytics';
 interface HeroSectionProps {
   onSubmit: (website: string) => void;
 }
@@ -13,8 +14,10 @@ export const HeroSection = ({
   const [website, setWebsite] = useState('');
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (website.trim()) {
-      onSubmit(website.trim());
+    const trimmedWebsite = website.trim();
+    if (trimmedWebsite) {
+      analytics.websiteSubmitted({ source: 'hero_form', website: trimmedWebsite });
+      onSubmit(trimmedWebsite);
     }
   };
   return <section className="bg-background py-20 lg:py-32">

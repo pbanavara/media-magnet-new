@@ -12,6 +12,7 @@ import {
   type Journalist,
   type OutreachMessages,
 } from '@/services/journalists';
+import { analytics } from '@/lib/analytics';
 
 interface JournalistListProps {
   website: string;
@@ -38,6 +39,7 @@ export const JournalistList = ({ website, onResults }: JournalistListProps) => {
   const [outreachMessages, setOutreachMessages] = useState<Record<string, OutreachMessages>>({});
   const [outreachErrors, setOutreachErrors] = useState<Record<string, string>>({});
   const [outreachLoading, setOutreachLoading] = useState<Record<string, boolean>>({});
+  const lastResultsStatusRef = useRef<{ website: string; status: 'success' | 'empty' | 'error' } | null>(null);
 
   useEffect(() => {
     onResultsRef.current = onResults;
@@ -73,6 +75,36 @@ export const JournalistList = ({ website, onResults }: JournalistListProps) => {
     callback(data.journalists);
   }, [data?.journalists, isError]);
   const journalistsList = useMemo(() => data?.journalists ?? [], [data?.journalists]);
+  const resultsCount = journalistsList.length;
+
+  useEffect(() => {
+    if (!website || isLoading) {
+      return;
+    }
+
+    const normalizedWebsite = website.trim();
+    const lastTracked = lastResultsStatusRef.current;
+
+    if (isError) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      if (!lastTracked || lastTracked.website !== normalizedWebsite || lastTracked.status !== 'error') {
+        analytics.journalistResultsFailed({ website: normalizedWebsite, errorMessage: message });
+        lastResultsStatusRef.current = { website: normalizedWebsite, status: 'error' };
+      }
+      return;
+    }
+
+    const status: 'success' | 'empty' = resultsCount > 0 ? 'success' : 'empty';
+
+    if (!lastTracked || lastTracked.website !== normalizedWebsite || lastTracked.status !== status) {
+      if (status === 'success') {
+        analytics.journalistResultsLoaded({ website: normalizedWebsite, count: resultsCount });
+      } else {
+        analytics.journalistResultsEmpty({ website: normalizedWebsite });
+      }
+      lastResultsStatusRef.current = { website: normalizedWebsite, status };
+    }
+  }, [website, resultsCount, isLoading, isError, error]);
 
   const outreachMutation = useMutation({
     mutationFn: ({ journalist }: { journalist: Journalist }) =>
@@ -89,6 +121,13 @@ export const JournalistList = ({ website, onResults }: JournalistListProps) => {
     }
     setExpandedJournalists(newExpanded);
 
+    analytics.outreachPanelToggled({
+      journalistName: journalist.name,
+      organization: journalist.parentMediaOrganization,
+      relevanceScore: journalist.relevanceScore,
+      expanded: willExpand,
+    });
+
     if (!willExpand) {
       return;
     }
@@ -96,6 +135,13 @@ export const JournalistList = ({ website, onResults }: JournalistListProps) => {
     if (outreachMessages[journalistKey] || outreachLoading[journalistKey]) {
       return;
     }
+
+    analytics.outreachRequested({
+      journalistName: journalist.name,
+      organization: journalist.parentMediaOrganization,
+      relevanceScore: journalist.relevanceScore,
+      website,
+    });
 
     setOutreachLoading((prev) => ({ ...prev, [journalistKey]: true }));
     setOutreachErrors((prev) => {
@@ -108,11 +154,24 @@ export const JournalistList = ({ website, onResults }: JournalistListProps) => {
       {
         onSuccess: (response) => {
           setOutreachMessages((prev) => ({ ...prev, [journalistKey]: response.outreach }));
+          analytics.outreachGenerated({
+            journalistName: journalist.name,
+            organization: journalist.parentMediaOrganization,
+            relevanceScore: journalist.relevanceScore,
+            website,
+          });
         },
         onError: (mutationError) => {
           const message =
             mutationError instanceof Error ? mutationError.message : 'Unable to generate outreach messages.';
           setOutreachErrors((prev) => ({ ...prev, [journalistKey]: message }));
+          analytics.outreachGenerationFailed({
+            journalistName: journalist.name,
+            organization: journalist.parentMediaOrganization,
+            relevanceScore: journalist.relevanceScore,
+            website,
+            errorMessage: message,
+          });
         },
         onSettled: () => {
           setOutreachLoading((prev) => ({ ...prev, [journalistKey]: false }));
@@ -183,6 +242,42 @@ export const JournalistList = ({ website, onResults }: JournalistListProps) => {
             const outreach = outreachMessages[journalistKey];
             const isGeneratingOutreach = Boolean(outreachLoading[journalistKey]);
             const outreachError = outreachErrors[journalistKey];
+            const journalistName = journalist.name;
+            const organization = journalist.parentMediaOrganization;
+
+            const handleCoverageClick = () => {
+              analytics.coverageLinkClicked({ journalistName, organization });
+            };
+
+            const handleProfileClick = (platform: 'twitter' | 'linkedin' | 'instagram') => () => {
+              analytics.profileLinkClicked({ journalistName, organization, platform });
+            };
+
+            const handleCopyEmail = () => {
+              if (!outreach) {
+                return;
+              }
+
+              analytics.outreachEmailCopied({ journalistName, organization });
+              navigator.clipboard
+                .writeText(outreach.email)
+                .catch((copyError) => {
+                  if (import.meta.env.DEV) {
+                    console.warn('[JournalistList] Failed to copy outreach email', copyError);
+                  }
+                });
+            };
+
+            const handleSendEmail = () => {
+              if (!outreach || !journalist.email) {
+                return;
+              }
+
+              analytics.outreachSendEmailClicked({ journalistName, organization, source: 'cta_button' });
+              window.open(
+                `mailto:${journalist.email}?subject=Story opportunity - ${companyName}&body=${encodeURIComponent(outreach.email)}`,
+              );
+            };
 
             return (
               <Card key={journalistKey} className="card-shadow hover-scale smooth-transition">
@@ -206,6 +301,7 @@ export const JournalistList = ({ website, onResults }: JournalistListProps) => {
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-primary hover:text-primary-glow"
+                            onClick={handleCoverageClick}
                           >
                             Read coverage ↗
                           </a>
@@ -217,6 +313,13 @@ export const JournalistList = ({ website, onResults }: JournalistListProps) => {
                           <a
                             href={`mailto:${journalist.email}`}
                             className="inline-flex items-center gap-2 text-primary hover:text-primary-glow smooth-transition"
+                            onClick={() =>
+                              analytics.outreachSendEmailClicked({
+                                journalistName,
+                                organization,
+                                source: 'header_mailto',
+                              })
+                            }
                           >
                             <Mail className="h-4 w-4" />
                             {journalist.email}
@@ -228,6 +331,7 @@ export const JournalistList = ({ website, onResults }: JournalistListProps) => {
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-2 text-primary hover:text-primary-glow smooth-transition"
+                            onClick={handleProfileClick('twitter')}
                           >
                             <Twitter className="h-4 w-4" />
                             X / Twitter
@@ -239,6 +343,7 @@ export const JournalistList = ({ website, onResults }: JournalistListProps) => {
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-2 text-primary hover:text-primary-glow smooth-transition"
+                            onClick={handleProfileClick('linkedin')}
                           >
                             <Linkedin className="h-4 w-4" />
                             LinkedIn
@@ -250,6 +355,7 @@ export const JournalistList = ({ website, onResults }: JournalistListProps) => {
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-2 text-primary hover:text-primary-glow smooth-transition"
+                            onClick={handleProfileClick('instagram')}
                           >
                             <Instagram className="h-4 w-4" />
                             Instagram
@@ -354,7 +460,7 @@ export const JournalistList = ({ website, onResults }: JournalistListProps) => {
                           variant="default"
                           size="sm"
                           disabled={!outreach || isGeneratingOutreach}
-                          onClick={() => outreach && navigator.clipboard.writeText(outreach.email)}
+                          onClick={handleCopyEmail}
                         >
                           Copy Email
                         </Button>
@@ -363,12 +469,7 @@ export const JournalistList = ({ website, onResults }: JournalistListProps) => {
                             variant="outline"
                             size="sm"
                             disabled={!outreach || isGeneratingOutreach}
-                            onClick={() =>
-                              outreach &&
-                              window.open(
-                                `mailto:${journalist.email}?subject=Story opportunity - ${companyName}&body=${encodeURIComponent(outreach.email)}`,
-                              )
-                            }
+                            onClick={handleSendEmail}
                           >
                             Send Email
                           </Button>

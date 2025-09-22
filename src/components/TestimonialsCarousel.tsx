@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { analytics } from '@/lib/analytics';
 
 interface Testimonial {
   id: string;
@@ -45,19 +46,40 @@ export const TestimonialsCarousel = () => {
     }
   ];
 
+  const goToIndex = (
+    getNextIndex: (previousIndex: number) => number,
+    action: 'next' | 'previous' | 'direct',
+  ) => {
+    setCurrentIndex((prev) => {
+      const nextIndex = ((getNextIndex(prev) % testimonials.length) + testimonials.length) % testimonials.length;
+      if (prev === nextIndex) {
+        return prev;
+      }
+
+      analytics.testimonialNavigated({ action, fromIndex: prev, toIndex: nextIndex });
+      return nextIndex;
+    });
+  };
+
   const nextTestimonial = () => {
-    setCurrentIndex((prev) => (prev + 1) % testimonials.length);
+    goToIndex((prev) => prev + 1, 'next');
   };
 
   const prevTestimonial = () => {
-    setCurrentIndex((prev) => (prev - 1 + testimonials.length) % testimonials.length);
+    goToIndex((prev) => prev - 1, 'previous');
+  };
+
+  const selectTestimonial = (index: number) => {
+    goToIndex(() => index, 'direct');
   };
 
   // Auto-advance testimonials
   useEffect(() => {
-    const timer = setInterval(nextTestimonial, 5000);
+    const timer = setInterval(() => {
+      setCurrentIndex((prev) => (prev + 1) % testimonials.length);
+    }, 5000);
     return () => clearInterval(timer);
-  }, []);
+  }, [testimonials.length]);
 
   return (
     <section className="py-20 bg-secondary/20">
@@ -88,12 +110,7 @@ export const TestimonialsCarousel = () => {
 
             {/* Navigation */}
             <div className="flex items-center justify-center gap-4">
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={prevTestimonial}
-                className="rounded-full"
-              >
+              <Button variant="outline" size="icon" onClick={prevTestimonial} className="rounded-full">
                 <ChevronLeft className="h-4 w-4" />
               </Button>
               
@@ -101,7 +118,7 @@ export const TestimonialsCarousel = () => {
                 {testimonials.map((_, index) => (
                   <button
                     key={index}
-                    onClick={() => setCurrentIndex(index)}
+                    onClick={() => selectTestimonial(index)}
                     className={`w-3 h-3 rounded-full smooth-transition ${
                       index === currentIndex ? 'bg-primary' : 'bg-muted'
                     }`}
@@ -109,12 +126,7 @@ export const TestimonialsCarousel = () => {
                 ))}
               </div>
               
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={nextTestimonial}
-                className="rounded-full"
-              >
+              <Button variant="outline" size="icon" onClick={nextTestimonial} className="rounded-full">
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </div>

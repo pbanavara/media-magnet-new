@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Rocket, Zap } from 'lucide-react';
+import { analytics } from '@/lib/analytics';
 
 interface MidPageCTAProps {
   onSubmit: (website: string) => void;
@@ -13,8 +14,10 @@ export const MidPageCTA = ({ onSubmit }: MidPageCTAProps) => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (website.trim()) {
-      onSubmit(website.trim());
+    const trimmedWebsite = website.trim();
+    if (trimmedWebsite) {
+      analytics.websiteSubmitted({ source: 'midpage_form', website: trimmedWebsite });
+      onSubmit(trimmedWebsite);
     }
   };
 
